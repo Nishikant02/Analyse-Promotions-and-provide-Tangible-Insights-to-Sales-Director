@@ -1,0 +1,112 @@
+Syntax.1.List of Product With Base_price and Greater than 500 and promo_code is BOGOF
+   SELECT distinct p.product_name,p.category,
+                    e.base_price
+   FROM retail_events.fact_events e
+   join dim_products p 
+   on p.product_code=e.product_code
+   where base_price  >'500' and promo_type='BOGOF'
+   order by base_price desc;
+
+
+Syntax.2. Generate Report number of store with each City:
+   SELECT  city,
+           count(store_id) as Total_store
+  FROM retail_events.dim_stores
+  group by City
+  order by Total_store desc;
+
+Syntax .3. Report for total Revenue
+
+  with Cte1 as (select c.campaign_name as campaign_name,
+	       e.`quantity_sold(before_promo)` * e.base_price as Total_revenue_before_promo,
+               e.`quantity_sold(after_promo)` * e.base_price as Total_revenue_after_promo ,
+               e.promo_type as promo_type
+ from dim_campaigns c 
+ join fact_events e 
+ using (campaign_id))
+ select campaign_name,
+       concat(round(Sum(Total_revenue_before_promo)/1000000,2),'M') revenue_before_promo,
+       concat(round(sum(
+       case
+        when promo_type ="25%off" then Total_revenue_after_promo*(1-0.25)
+        when promo_type ="50%off" then Total_revenue_after_promo*(1-0.50)
+        when promo_type ="33%off" then Total_revenue_after_promo*(1-0.30)
+        when promo_type ="500Cashback" then Total_revenue_after_promo-500
+        else Total_revenue_after_promo
+        end/100000),2),'M') as revenue_after_promo
+ from cte1
+ group by campaign_name
+ order by revenue_before_promo desc;
+
+Query . 4.:
+  
+
+WITH cte AS (
+    SELECT
+        c.campaign_name AS campaign_name,
+        p.category AS category,
+        SUM(f.`quantity_sold(before_promo)`) AS Quantity_before_promo,
+        SUM(f.`quantity_sold(after_promo)`) AS Quantity_after_promo,
+        f.promo_type AS promo_type
+    FROM
+        dim_products p
+        JOIN fact_events f USING (product_code)
+        JOIN dim_campaigns c USING (campaign_id)
+    GROUP BY
+        category, campaign_name, promo_type
+),
+
+cte2 AS (
+    SELECT
+        category,
+        Quantity_before_promo,
+        CASE WHEN promo_type = 'BOGOF' THEN Quantity_after_promo * 2 ELSE Quantity_after_promo END AS Quantity_after_promo
+    FROM
+        cte
+    WHERE
+        campaign_name = 'Diwali'
+)
+
+SELECT
+    category,
+    Quantity_before_promo,
+    Quantity_after_promo,
+	CONCAT(ROUND((Quantity_after_promo - Quantity_before_promo) / Quantity_before_promo * 100, 2), '%') AS ISU_percentage,
+    RANK() OVER (ORDER BY (Quantity_after_promo - Quantity_before_promo) / Quantity_before_promo * 100 DESC) AS rankings
+FROM
+    cte2;
+
+Query .5. 
+WITH Revenue AS (
+    SELECT 
+        p.product_name AS Product_name,
+        p.category AS category,
+        concat((f.`quantity_sold(before_promo)`) * f.base_price,'M') AS Revenue_before_promo,
+        concat((
+            CASE 
+                WHEN promo_type = '25% OFF' THEN f.`quantity_sold(after_promo)` * (1 - 0.25) * f.base_price
+                WHEN promo_type = '50% OFF' THEN f.`quantity_sold(after_promo)` * (1 - 0.50) * f.base_price
+                WHEN promo_type = '33% OFF' THEN f.`quantity_sold(after_promo)` * (1 - 0.33) * f.base_price
+                WHEN promo_type = '500 OFF' THEN (f.`quantity_sold(after_promo)` - 500) * f.base_price
+                WHEN promo_type = 'BOGOF' THEN f.`quantity_sold(after_promo)` * f.base_price
+                ELSE f.`quantity_sold(after_promo)` * f.base_price
+            END
+        ),'M') AS Revenue_after_promo
+    FROM
+        dim_products p
+        JOIN
+        fact_events f ON p.product_code = f.product_code
+    GROUP BY Product_name, category, f.base_price
+)
+
+SELECT 
+    Product_name,
+    category,
+    Revenue_before_promo,
+    Revenue_after_promo,
+    CONCAT(ROUND((Revenue_after_promo - Revenue_before_promo) / Revenue_before_promo * 100, 2), '%') as IR
+FROM Revenue
+group by Product_name
+ORDER BY IR DESC
+LIMIT 5;
+  
